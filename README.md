@@ -193,6 +193,38 @@ So a common pattern is: let Puppeteer navigate and set up state, then call
 `chromeshot` to capture the result for the agent to inspect. When you only need
 eyes and not hands, reach for `chromeshot` alone.
 
+## Rendering infographics & fixed-size images
+
+An infographic is just HTML at a fixed canvas size — so you can design it in HTML/CSS and let
+chromeshot render it to a pixel-perfect image, with no design-tool export step. Pin the width
+and height, and capture at a 2× scale for crisp output:
+
+```sh
+# 1080×1080 square (Instagram / Facebook)
+capture --url "file://$PWD/infographic.html" -n square --width 1080 --no-full-page --height 1080 --scale 2
+
+# 1080×1920 vertical (Stories / Reels / TikTok)
+capture --url "file://$PWD/infographic.html" -n story  --width 1080 --no-full-page --height 1920 --scale 2
+
+# 1280×720 slide / thumbnail
+capture --url "file://$PWD/infographic.html" -n slide  --width 1280 --no-full-page --height 720  --scale 2
+```
+
+Size the page to the canvas (e.g. `body { width: 1080px; height: 1080px; margin: 0; }`).
+Because it's ordinary HTML you can template it and generate a whole **series** of images from
+data — one design, many outputs. Use `--format pdf` for print-ready output instead.
+
+The same as reusable `capture.toml` presets:
+
+```toml
+[[page]]
+name       = "square"
+url        = "file:///path/to/infographic.html"
+full_page  = false
+width      = 1080
+height     = 1080
+```
+
 ## Licence
 
 MIT — see [LICENSE](LICENSE).
