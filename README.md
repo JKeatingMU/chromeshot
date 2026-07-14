@@ -55,13 +55,25 @@ capture --url file://$PWD/docs/sample-page.html -n sample --width 720
 
 ## Install
 
+### Homebrew (recommended)
+
+```sh
+brew install JKeatingMU/tap/chromeshot
+```
+
+This pulls in a suitable Python automatically. Upgrade later with
+`brew upgrade chromeshot`.
+
+### Manual
+
 ```sh
 git clone https://github.com/JKeatingMU/chromeshot.git
 install -m 755 chromeshot/capture ~/bin/capture   # or anywhere on your PATH
 ```
 
 Or just copy the single `capture` script wherever you like and make it
-executable (`chmod +x capture`).
+executable (`chmod +x capture`). Manual installs use your own `python3`
+(3.11+).
 
 ## Usage
 
