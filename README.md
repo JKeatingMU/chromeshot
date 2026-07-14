@@ -159,6 +159,40 @@ to be exactly one screen tall and will collapse to whatever viewport height it
 is given — a misleading measurement. For those pages set `full_page = false`
 and pin an explicit `height`.
 
+## Using chromeshot with an AI agent
+
+A coding agent reasoning over HTML/DOM is working from the *symbolic* version of
+a page. But layout bugs — overlap, clipping, contrast, "does this actually look
+right" — live in the *rendered* pixels. `getBoundingClientRect` tells you where a
+box should be; a screenshot shows where it is. Handing the model the image closes
+that gap and lets it see what the user sees.
+
+The loop is simply **capture, then read the PNG back**:
+
+```sh
+capture --url http://localhost:3000 -n home --out-dir /tmp
+# → /tmp/home_1440x2400.png, which the agent then views as an image
+```
+
+Because it captures the full page in one pass, verifies the file, and exits
+non-zero on failure, it slots straight into an agent's tool loop — render a
+change, look at it, decide, repeat. That's exactly how this project was built:
+each page was captured and viewed to confirm the layout, which is how the
+truncated tall page and the collapsed `100vh` page were caught.
+
+### Pairing with Puppeteer / Playwright
+
+The two are complementary — one *acts*, the other *sees*:
+
+- **Puppeteer / Playwright** drive stateful flows: click, type, log in, wait on
+  network. Use them to put the page into the state you care about.
+- **chromeshot** grabs the frame once that state exists — no browser context to
+  manage, no dependency, full-page by default.
+
+So a common pattern is: let Puppeteer navigate and set up state, then call
+`chromeshot` to capture the result for the agent to inspect. When you only need
+eyes and not hands, reach for `chromeshot` alone.
+
 ## Licence
 
 MIT — see [LICENSE](LICENSE).
