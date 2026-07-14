@@ -1,0 +1,418 @@
+#!/usr/bin/env python3
+"""capture — headless-Chrome full-page screenshot tool (CDP-driven).
+
+Reads a capture.toml describing pages to render, drives a single headless
+Chrome instance over the DevTools Protocol, and writes full-page PNG/JPEG/PDF
+files. Height is auto-detected (captureBeyondViewport) unless pinned.
+
+Usage:
+  capture                      capture all pages in ./capture.toml
+  capture display learn        only the named pages
+  capture -c masks.toml        use an explicit config
+  capture --url file://... -n adhoc    one-off page, no config file
+  capture --list               print configured pages, capture nothing
+  capture --open               open each result after writing it
+
+Requires only the Python standard library (Python 3.11+ for tomllib).
+"""
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import os
+import shutil
+import socket
+import struct
+import subprocess
+import sys
+import tempfile
+import time
+import tomllib
+from pathlib import Path
+
+def find_chrome():
+    """Locate a Chrome/Chromium/Edge binary across macOS, Linux and Windows."""
+    if os.environ.get("CHROME_BIN"):
+        return os.environ["CHROME_BIN"]
+    for name in (
+        "google-chrome", "google-chrome-stable", "chromium",
+        "chromium-browser", "chrome", "msedge",
+    ):
+        found = shutil.which(name)
+        if found:
+            return found
+    for path in (
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    ):
+        if Path(path).exists():
+            return path
+    return None
+
+
+CHROME = find_chrome()
+
+BUILTIN_DEFAULTS = {
+    "width": 1440,
+    "full_page": True,
+    "out_dir": "/tmp",
+    "device_scale": 2,
+    "format": "png",
+    "wait": "load",
+    "name_template": "{name}_{width}x{height}",
+}
+
+
+# --------------------------------------------------------------------------
+# Minimal WebSocket client (client frames masked; handles fragmentation)
+# --------------------------------------------------------------------------
+class WSClient:
+    def __init__(self, url, timeout=60):
+        assert url.startswith("ws://"), url
+        host_port, _, path = url[len("ws://"):].partition("/")
+        host, _, port = host_port.partition(":")
+        self.sock = socket.create_connection((host, int(port)), timeout=timeout)
+        self.sock.settimeout(timeout)
+        self._buf = b""
+        self._handshake(host, int(port), "/" + path)
+
+    def _handshake(self, host, port, path):
+        key = base64.b64encode(os.urandom(16)).decode()
+        req = (
+            f"GET {path} HTTP/1.1\r\n"
+            f"Host: {host}:{port}\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            f"Sec-WebSocket-Key: {key}\r\n"
+            "Sec-WebSocket-Version: 13\r\n\r\n"
+        )
+        self.sock.sendall(req.encode())
+        data = b""
+        while b"\r\n\r\n" not in data:
+            chunk = self.sock.recv(4096)
+            if not chunk:
+                raise ConnectionError("websocket handshake failed")
+            data += chunk
+        self._buf = data.split(b"\r\n\r\n", 1)[1]
+
+    def send(self, text):
+        payload = text.encode()
+        header = bytearray([0x81])  # FIN + text frame
+        n = len(payload)
+        if n < 126:
+            header.append(0x80 | n)
+        elif n < 65536:
+            header.append(0x80 | 126)
+            header += struct.pack(">H", n)
+        else:
+            header.append(0x80 | 127)
+            header += struct.pack(">Q", n)
+        mask = os.urandom(4)
+        header += mask
+        masked = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+        self.sock.sendall(bytes(header) + masked)
+
+    def _read(self, n):
+        while len(self._buf) < n:
+            chunk = self.sock.recv(65536)
+            if not chunk:
+                raise ConnectionError("websocket closed")
+            self._buf += chunk
+        out, self._buf = self._buf[:n], self._buf[n:]
+        return out
+
+    def recv(self):
+        chunks = []
+        while True:
+            b0, b1 = self._read(2)
+            fin, opcode, length = b0 & 0x80, b0 & 0x0F, b1 & 0x7F
+            if length == 126:
+                length = struct.unpack(">H", self._read(2))[0]
+            elif length == 127:
+                length = struct.unpack(">Q", self._read(8))[0]
+            payload = self._read(length) if length else b""
+            if opcode == 0x8:
+                raise ConnectionError("websocket closed by server")
+            if opcode in (0x9, 0xA):  # ping / pong — ignore
+                continue
+            chunks.append(payload)
+            if fin:
+                break
+        return b"".join(chunks).decode()
+
+    def close(self):
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+
+
+# --------------------------------------------------------------------------
+# DevTools Protocol wrapper
+# --------------------------------------------------------------------------
+class CDP:
+    def __init__(self, ws):
+        self.ws = ws
+        self._id = 0
+        self._responses = {}
+
+    def call(self, method, params=None, session_id=None):
+        self._id += 1
+        mid = self._id
+        msg = {"id": mid, "method": method, "params": params or {}}
+        if session_id:
+            msg["sessionId"] = session_id
+        self.ws.send(json.dumps(msg))
+        while mid not in self._responses:
+            data = json.loads(self.ws.recv())
+            if "id" in data:
+                self._responses[data["id"]] = data
+        data = self._responses.pop(mid)
+        if "error" in data:
+            raise RuntimeError(f"{method} failed: {data['error']}")
+        return data.get("result", {})
+
+    def evaluate(self, expr, session_id):
+        r = self.call(
+            "Runtime.evaluate",
+            {"expression": expr, "returnByValue": True},
+            session_id,
+        )
+        return r.get("result", {}).get("value")
+
+
+# --------------------------------------------------------------------------
+# Chrome lifecycle
+# --------------------------------------------------------------------------
+class Chrome:
+    def __init__(self):
+        self.tmp = tempfile.mkdtemp(prefix="capture-chrome-")
+        self.proc = subprocess.Popen(
+            [
+                CHROME,
+                "--headless=new",
+                "--disable-gpu",
+                "--hide-scrollbars",
+                "--force-color-profile=srgb",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--remote-debugging-port=0",
+                f"--user-data-dir={self.tmp}",
+                "about:blank",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        ws_url = self._read_devtools_endpoint()
+        self.cdp = CDP(WSClient(ws_url))
+
+    def _read_devtools_endpoint(self, timeout=15):
+        portfile = Path(self.tmp) / "DevToolsActivePort"
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if portfile.exists():
+                lines = portfile.read_text().splitlines()
+                if len(lines) >= 2:
+                    return f"ws://127.0.0.1:{lines[0]}{lines[1]}"
+            if self.proc.poll() is not None:
+                raise RuntimeError("Chrome exited before opening a debug port")
+            time.sleep(0.1)
+        raise RuntimeError("timed out waiting for Chrome debug port")
+
+    def close(self):
+        try:
+            self.cdp.ws.close()
+        except Exception:
+            pass
+        self.proc.terminate()
+        try:
+            self.proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+
+# --------------------------------------------------------------------------
+# Capture one page
+# --------------------------------------------------------------------------
+def _wait_ready(cdp, session, wait, timeout=30):
+    deadline = time.time() + timeout
+    while cdp.evaluate("document.readyState", session) != "complete":
+        if time.time() > deadline:
+            raise TimeoutError("page did not reach readyState=complete")
+        time.sleep(0.1)
+    if wait == "load":
+        return
+    kind, _, arg = wait.partition(":")
+    if kind == "delay":
+        time.sleep(float(arg) / 1000.0)
+    elif kind == "networkidle":
+        time.sleep(0.5)
+    elif kind == "selector":
+        sel = json.dumps(arg)
+        while not cdp.evaluate(f"!!document.querySelector({sel})", session):
+            if time.time() > deadline:
+                raise TimeoutError(f"selector {arg!r} never appeared")
+            time.sleep(0.1)
+
+
+def capture_page(chrome, page):
+    cdp = chrome.cdp
+    width = int(page["width"])
+    scale = float(page["device_scale"])
+    full = bool(page["full_page"])
+    fmt = page["format"]
+
+    target = cdp.call("Target.createTarget", {"url": "about:blank"})
+    target_id = target["targetId"]
+    session = cdp.call(
+        "Target.attachToTarget", {"targetId": target_id, "flatten": True}
+    )["sessionId"]
+    try:
+        vp_height = int(page["height"]) if not full else 900
+        cdp.call(
+            "Emulation.setDeviceMetricsOverride",
+            {
+                "width": width,
+                "height": vp_height,
+                "deviceScaleFactor": scale,
+                "mobile": False,
+            },
+            session,
+        )
+        cdp.call("Page.navigate", {"url": page["url"]}, session)
+        _wait_ready(cdp, session, page["wait"])
+
+        dims = cdp.evaluate(
+            "[document.documentElement.scrollWidth,"
+            " document.documentElement.scrollHeight]",
+            session,
+        ) or [width, vp_height]
+        css_w, css_h = int(dims[0]), int(dims[1])
+        out_h = css_h if full else int(page["height"])
+
+        if fmt == "pdf":
+            data = cdp.call(
+                "Page.printToPDF",
+                {"printBackground": True, "preferCSSPageSize": True},
+                session,
+            )["data"]
+        else:
+            params = {"format": fmt, "captureBeyondViewport": full}
+            if fmt == "jpeg":
+                params["quality"] = 90
+            data = cdp.call("Page.captureScreenshot", params, session)["data"]
+
+        name = page["name_template"].format(
+            name=page["name"], width=width, height=out_h
+        )
+        out_dir = Path(os.path.expanduser(page["out_dir"]))
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"{name}.{fmt}"
+        out_path.write_bytes(base64.b64decode(data))
+        return out_path, (css_w, out_h)
+    finally:
+        cdp.call("Target.closeTarget", {"targetId": target_id})
+
+
+# --------------------------------------------------------------------------
+# Config + CLI
+# --------------------------------------------------------------------------
+def load_config(path):
+    if not path.exists():
+        return {}, []
+    with open(path, "rb") as fh:
+        data = tomllib.load(fh)
+    return data.get("defaults", {}), data.get("page", [])
+
+
+def resolve(page, defaults, overrides):
+    merged = dict(BUILTIN_DEFAULTS)
+    merged.update(defaults)
+    merged.update(page)
+    merged.update({k: v for k, v in overrides.items() if v is not None})
+    return merged
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="capture", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("names", nargs="*", help="only capture these page names")
+    ap.add_argument("-c", "--config", default="capture.toml")
+    ap.add_argument("--url", help="ad-hoc page URL (no config file needed)")
+    ap.add_argument("-n", "--name", help="name for the ad-hoc page")
+    ap.add_argument("--width", type=int)
+    ap.add_argument("--height", type=int)
+    ap.add_argument("--full-page", dest="full_page", action="store_true", default=None)
+    ap.add_argument("--no-full-page", dest="full_page", action="store_false")
+    ap.add_argument("--scale", dest="device_scale", type=float)
+    ap.add_argument("--wait")
+    ap.add_argument("--out-dir", dest="out_dir")
+    ap.add_argument("--format", choices=["png", "jpeg", "pdf"])
+    ap.add_argument("--list", action="store_true", help="list pages and exit")
+    ap.add_argument("--open", action="store_true", help="open each result")
+    args = ap.parse_args(argv)
+
+    overrides = {
+        "width": args.width,
+        "height": args.height,
+        "full_page": args.full_page,
+        "device_scale": args.device_scale,
+        "wait": args.wait,
+        "out_dir": args.out_dir,
+        "format": args.format,
+    }
+
+    if args.url:
+        defaults, pages = {}, [{"name": args.name or "capture", "url": args.url}]
+        if args.height is not None and args.full_page is None:
+            overrides["full_page"] = False
+    else:
+        cfg_path = Path(args.config)
+        defaults, pages = load_config(cfg_path)
+        if not pages:
+            sys.exit(f"capture: no pages found in {cfg_path}")
+        if args.names:
+            wanted = set(args.names)
+            pages = [p for p in pages if p.get("name") in wanted]
+            missing = wanted - {p.get("name") for p in pages}
+            if missing:
+                sys.exit(f"capture: unknown page(s): {', '.join(sorted(missing))}")
+
+    resolved = [resolve(p, defaults, overrides) for p in pages]
+
+    if args.list:
+        for p in resolved:
+            mode = "auto" if p["full_page"] else f"{p['height']}px"
+            print(f"{p['name']:<24} {p['width']}px/{mode:<8} {p['url']}")
+        return 0
+
+    if not CHROME:
+        sys.exit("capture: no Chrome/Chromium/Edge found (set CHROME_BIN)")
+
+    chrome = Chrome()
+    failures = 0
+    try:
+        for p in resolved:
+            try:
+                out_path, (w, h) = capture_page(chrome, p)
+                size = out_path.stat().st_size
+                if size == 0:
+                    raise RuntimeError("wrote an empty file")
+                print(f"{p['name']:<24} {w}x{h:<6} -> {out_path}  ({size//1024} KB)")
+                if args.open:
+                    subprocess.run(["open", str(out_path)], check=False)
+            except Exception as exc:
+                failures += 1
+                print(f"{p['name']:<24} FAILED: {exc}", file=sys.stderr)
+    finally:
+        chrome.close()
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

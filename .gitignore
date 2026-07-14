@@ -1,0 +1,12 @@
+# Local project config (users copy capture.example.toml -> capture.toml)
+capture.toml
+
+# Captured output
+*.png
+*.jpeg
+*.jpg
+*.pdf
+
+# Python
+__pycache__/
+*.pyc

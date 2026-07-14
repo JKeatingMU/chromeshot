@@ -1,0 +1,27 @@
+# capture.example.toml — copy to capture.toml and edit for your project.
+# Run:  capture            (all pages)
+#       capture home       (one page)
+#       capture --list     (show config, capture nothing)
+
+[defaults]
+width         = 1440
+full_page     = true                 # auto-detect height
+out_dir       = "/tmp"
+device_scale  = 2                     # retina-sharp PNGs
+format        = "png"                 # png | jpeg | pdf
+wait          = "load"                # load | networkidle | delay:800 | selector:#ready
+name_template = "{name}_{width}x{height}"
+
+[[page]]
+name = "home"
+url  = "https://example.com"
+
+[[page]]
+name = "local_report"
+url  = "file:///path/to/report.html"
+
+[[page]]
+name       = "dashboard"
+url        = "file:///path/to/dashboard.html"
+full_page  = false                   # 100vh design — pin height rather than auto-detect
+height     = 1800
