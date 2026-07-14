@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>chromeshot sample page</title>
+<style>
+  :root {
+    --bg: #0f1222; --panel: #1a1f38; --line: #2b3358;
+    --ink: #eef1ff; --muted: #9aa4d4; --accent: #7c9cff; --accent2: #58e6c9;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 56px 28px 72px; }
+  .hero { text-align: center; padding: 40px 0 8px; }
+  .badge {
+    display: inline-block; font-size: 13px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--accent2);
+    border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px;
+  }
+  h1 { font-size: 44px; line-height: 1.08; margin: 18px 0 10px; }
+  h1 span { color: var(--accent); }
+  .lede { color: var(--muted); font-size: 18px; max-width: 540px; margin: 0 auto; }
+  section {
+    margin-top: 22px; padding: 22px 24px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 14px;
+  }
+  h2 { font-size: 22px; margin: 0 0 8px; }
+  p { margin: 0 0 4px; color: var(--muted); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 6px; }
+  .card {
+    background: #12172c; border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px 18px;
+  }
+  .stat { font-size: 30px; font-weight: 700; color: var(--accent2); }
+  .k { color: var(--muted); font-size: 14px; }
+  .swatches { display: flex; gap: 10px; margin-top: 10px; }
+  .sw { flex: 1; height: 46px; border-radius: 10px; }
+  footer { margin-top: 30px; text-align: center; color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hero">
+    <span class="badge">Full-page capture</span>
+    <h1>One tall page,<br><span>captured whole.</span></h1>
+    <p class="lede">This page is deliberately taller than a browser viewport, so a
+    fixed-height screenshot would cut it off. chromeshot measures it and grabs
+    every pixel.</p>
+  </div>
+
+  <section>
+    <h2>Auto-detected height</h2>
+    <p>No <code>--window-size</code> guesswork. The scroll height is read from the
+    page and the whole thing is rendered in a single pass.</p>
+    <div class="grid">
+      <div class="card"><div class="stat">100%</div><div class="k">of the page, top to bottom</div></div>
+      <div class="card"><div class="stat">2×</div><div class="k">retina device scale by default</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Sharp on every display</h2>
+    <p>Captured at a 2× device scale factor, so text and edges stay crisp when the
+    image is viewed or printed at size.</p>
+    <div class="swatches">
+      <div class="sw" style="background:#7c9cff"></div>
+      <div class="sw" style="background:#58e6c9"></div>
+      <div class="sw" style="background:#f4a259"></div>
+      <div class="sw" style="background:#e26d9c"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Batch-friendly</h2>
+    <p>Describe every page once in <code>capture.toml</code> and render them all
+    from a single headless Chrome launch.</p>
+    <div class="grid">
+      <div class="card"><div class="stat">1</div><div class="k">Chrome launch per run</div></div>
+      <div class="card"><div class="stat">0</div><div class="k">third-party dependencies</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Drops into CI</h2>
+    <p>Each capture is verified and the process exits non-zero on any failure, so
+    it works as a layout smoke test in a pre-commit hook or pipeline.</p>
+  </section>
+
+  <footer>Rendered by chromeshot · this whole page is one screenshot</footer>
+</div>
+</body>
+</html>

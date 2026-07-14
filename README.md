@@ -28,6 +28,24 @@ evidence_pack   1440x3265  ->  /tmp/mask_atlas_evidence_pack_1440x3265.png  (158
 - **No dependencies.** Pure Python standard library — no Puppeteer, no Node,
   no `pip install`. One file you can drop on your `PATH`.
 
+## Screenshots
+
+Below is a single capture of [`docs/sample-page.html`](docs/sample-page.html) —
+a page taller than a browser viewport. A fixed-height screenshot would cut it
+off; chromeshot detects the scroll height and renders the whole thing in one
+pass, at a 2× device scale:
+
+```sh
+capture --url file://$PWD/docs/sample-page.html -n sample --width 720
+```
+
+<p align="center">
+  <img src="docs/sample-fullpage_720x1365.png" width="360"
+       alt="Full-page screenshot of the sample page, captured top to bottom">
+</p>
+
+<p align="center"><em>720×1365 CSS px, captured in full — hero, four sections and footer.</em></p>
+
 ## Requirements
 
 - Python **3.11+** (uses the standard-library `tomllib`).

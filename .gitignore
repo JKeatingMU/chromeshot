@@ -7,6 +7,9 @@ capture.toml
 *.jpg
 *.pdf
 
+# ...but keep committed README/demo assets under docs/
+!docs/*.png
+
 # Python
 __pycache__/
 *.pyc
