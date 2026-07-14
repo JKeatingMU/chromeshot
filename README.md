@@ -5,6 +5,8 @@ A tiny, dependency-free CLI that turns local or remote web pages into
 captures the entire scroll height automatically — no guessing at a
 `--window-size` and no truncated tall pages.
 
+![chromeshot in action](docs/demo.gif)
+
 ```
 capture                    # screenshot every page in ./capture.toml
 capture display learn      # only the named pages
@@ -59,6 +61,7 @@ capture [names...]          capture all pages, or only the named ones
       --format FMT          png | jpeg | pdf
       --list                list configured pages and exit
       --open                open each result after writing it
+      --version             print version and exit
 ```
 
 Each capture is verified (file exists, non-zero) and the process exits

@@ -31,6 +31,9 @@ import time
 import tomllib
 from pathlib import Path
 
+__version__ = "1.0.0"
+
+
 def find_chrome():
     """Locate a Chrome/Chromium/Edge binary across macOS, Linux and Windows."""
     if os.environ.get("CHROME_BIN"):
@@ -341,6 +344,8 @@ def resolve(page, defaults, overrides):
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="capture", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--version", action="version",
+                    version=f"%(prog)s {__version__}")
     ap.add_argument("names", nargs="*", help="only capture these page names")
     ap.add_argument("-c", "--config", default="capture.toml")
     ap.add_argument("--url", help="ad-hoc page URL (no config file needed)")
