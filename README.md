@@ -55,25 +55,49 @@ capture --url file://$PWD/docs/sample-page.html -n sample --width 720
 
 ## Install
 
-### Homebrew (recommended)
+`chromeshot` is a single Python script and runs anywhere Python 3.11+ and a
+Chromium-based browser are available — macOS, Linux and Windows.
+
+### Homebrew — macOS & Linux (recommended)
+
+[Homebrew](https://brew.sh) runs on both macOS and Linux:
 
 ```sh
 brew install JKeatingMU/tap/chromeshot
 ```
 
-This pulls in a suitable Python automatically. Upgrade later with
+It pulls in a suitable Python automatically. Upgrade later with
 `brew upgrade chromeshot`.
 
-### Manual
+### Manual — macOS & Linux
 
 ```sh
 git clone https://github.com/JKeatingMU/chromeshot.git
-install -m 755 chromeshot/capture ~/bin/capture   # or anywhere on your PATH
+install -m 755 chromeshot/capture ~/.local/bin/capture   # or anywhere on your PATH
 ```
 
 Or just copy the single `capture` script wherever you like and make it
 executable (`chmod +x capture`). Manual installs use your own `python3`
 (3.11+).
+
+### Windows
+
+The shebang line doesn't apply on Windows, so run the script through Python:
+
+```powershell
+git clone https://github.com/JKeatingMU/chromeshot.git
+python chromeshot\capture --url https://example.com -n example
+```
+
+For a plain `capture` command, drop a one-line `capture.cmd` on your `PATH`:
+
+```bat
+@echo off
+python "C:\path\to\chromeshot\capture" %*
+```
+
+`chromeshot` auto-detects Chrome / Edge in the usual `Program Files` locations;
+set `CHROME_BIN` if yours lives elsewhere.
 
 ## Usage
 
