@@ -193,6 +193,21 @@ So a common pattern is: let Puppeteer navigate and set up state, then call
 `chromeshot` to capture the result for the agent to inspect. When you only need
 eyes and not hands, reach for `chromeshot` alone.
 
+## Claude Skill
+
+This repo ships an [Agent Skill](https://docs.claude.com/en/docs/agents-and-tools/agent-skills)
+in [`skill/chromeshot`](skill/chromeshot) that teaches Claude *when* and *how* to use
+chromeshot — the capture-then-look verification loop, the `100vh` gotcha, and the infographic
+recipes. Drop it into your skills directory:
+
+```sh
+cp -r skill/chromeshot ~/.claude/skills/chromeshot   # Claude Code (personal)
+```
+
+The skill calls the `capture` CLI, so install chromeshot first (see above). It works wherever
+`capture` and Chrome are available — e.g. Claude Code on your machine. (In a hosted sandbox
+without Chrome, the capture step won't run.)
+
 ## Rendering infographics & fixed-size images
 
 An infographic is just HTML at a fixed canvas size — so you can design it in HTML/CSS and let
